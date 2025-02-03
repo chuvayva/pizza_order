@@ -1,0 +1,12 @@
+default: &default
+  adapter: postgresql
+  encoding: utf8
+
+development:
+  <<: *default
+  database: pizza_order_development
+
+test:
+  <<: *default
+  url: <%= ENV['DATABASE_URL']%>
+  database: pizza_order_test
