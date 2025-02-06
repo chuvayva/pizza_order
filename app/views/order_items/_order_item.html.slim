@@ -1,0 +1,10 @@
+li
+  p = order_item.name
+  - if order_item.addons.present? || order_item.removals.present?
+    ul
+      - if order_item.addons.present?
+        li
+          p #{OrderItem.human_attribute_name(:addons)}: #{order_item.addons_string}
+      - if order_item.removals.present?
+        li
+          p #{OrderItem.human_attribute_name(:removals)}: #{order_item.removals_string}

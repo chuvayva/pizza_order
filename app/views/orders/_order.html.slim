@@ -1,0 +1,16 @@
+= turbo_frame_tag order do
+  hr
+  .container
+    div
+      p = render_attribute(order, :public_id)
+      p = render_attribute(order, :created_at)
+      p = render_attribute(order, :promotion_codes)
+      p = render_attribute(order, :discount_code)
+      p.extra-margin = render_attribute(order, :total_price)
+
+      = button_to t("orders.complete"), order_path(order), method: :patch, params: { order: { state: :completed } }
+
+    div
+      p #{t("orders.items")}:
+      ul
+        == render order.order_items
