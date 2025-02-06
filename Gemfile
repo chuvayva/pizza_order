@@ -4,7 +4,7 @@ ruby "3.4.1"
 gem "rails", "~> 8.0.1"
 gem "pg", "~> 1.1"
 gem "propshaft"
-gem "net-smtp", "0.5.0"
+gem "net-smtp", "0.5.1"
 gem "puma", ">= 5.0"
 gem "bootsnap", require: false
 gem "hotwire-rails"
