@@ -1,0 +1,38 @@
+x-app: &app
+  build: .
+  environment:
+    DATABASE_URL: postgresql://postgres:password@db:5432
+    EDITOR: vim # for rails credentials:edit
+  tmpfs:
+    - /tmp
+    - /app/tmp/pids
+  volumes:
+    - .:/app
+    - bundle:/usr/local/bundle
+    - rails_cache:/app/tmp/cache
+  depends_on:
+    - db
+
+services:
+  app:
+    <<: *app
+    command: rails s -p 3000 -e development -b '0.0.0.0'
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    volumes:
+      - db:/var/lib/postgresql/data
+    logging:
+      driver: none
+    ports:
+      - 5432:5432
+
+volumes:
+  db:
+  bundle:
+  rails_cache:
