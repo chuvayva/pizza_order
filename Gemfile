@@ -10,6 +10,10 @@ gem "bootsnap", require: false
 gem "hotwire-rails"
 gem "importmap-rails"
 
+gem "money"
+gem "draper"
+gem "slim-rails"
+
 group :development, :test do
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
   gem "brakeman", require: false

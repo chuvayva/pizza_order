@@ -1,1 +1,16 @@
 en:
+  activerecord:
+    attributes:
+      order:
+        public_id: ID
+        created_at: Created
+        promotion_codes: Promotion Codes
+        discount_code: Discount Code
+        total_price: Total Price
+      order_item:
+        addons: Add
+        removals: Remove
+  orders:
+    title: Orders
+    complete: Complete
+    items: Items
