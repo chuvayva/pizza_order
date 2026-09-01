@@ -96,7 +96,11 @@ if [ -f "$STATE_FILE" ] && jq empty "$STATE_FILE" 2>/dev/null; then
   if [ -z "$lifecycle" ]; then
     # Old flat format: {"1":"applied",...} — derive the lifecycle from it.
     steps="$(jq -c 'with_entries(select(.key | test("^[0-9]+$")))' "$STATE_FILE")"
-    lifecycle="deploy"
+    if [ "$(jq -r --argjson total "$TOTAL" '[range(1; $total + 1) | tostring] | map(. as $k | ($steps[$k] // "pending")) | all(. == "applied")' --argjson steps "$steps" <<<'null')" = "true" ]; then
+      lifecycle="finished"
+    else
+      lifecycle="deploy"
+    fi
   fi
 
   if [ -n "$state_commit" ] && [ "$state_commit" != "$COMMIT" ]; then
