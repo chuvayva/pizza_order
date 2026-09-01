@@ -1,0 +1,74 @@
+name: Deploy C1 (phase 1 of 2 workflows)
+
+# Two-phased deployment split across TWO workflows.
+#
+#   Deploy C1 (this file)  ->  steps 1..N, uploads `deploy-state-c`
+#   Deploy C2              ->  finds that artifact repo-wide and runs --finalize
+#
+# The two workflows are glued together by two things:
+#   * a SHARED concurrency group (`deploy-c-<ref>`), so C2 can never start
+#     while C1 is still applying steps — it queues instead;
+#   * a SHARED artifact name (`deploy-state-c`), read across runs and across
+#     workflows through the artifacts API.
+on:
+  workflow_dispatch:
+    inputs:
+      until_step:
+        description: "Last step to apply in phase 1 (1-5)"
+        type: string
+        default: "3"
+      reset_state:
+        description: "Ignore state from previous runs and start from scratch"
+        type: boolean
+        default: false
+
+# Shared with Deploy C2 — one deployment at a time per ref, across both files.
+concurrency:
+  group: deploy-c-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  phase_1:
+    name: Phase 1 — steps 1..N
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore deployment state
+        if: ${{ inputs.reset_state != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: .github/scripts/fetch_deploy_state.sh deploy-state-c
+
+      - name: Run phase 1
+        run: script/test_deploy.sh --until ${{ inputs.until_step }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy C1 — phase 1 through step ${{ inputs.until_step }}"
+            echo
+            echo '```json'
+            cat tmp/deploy_state.json 2>/dev/null || echo '{}'
+            echo '```'
+            echo
+            echo 'Run **Deploy C2 (finalize)** on the same ref to complete the deployment.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-state-c
+          path: tmp/deploy_state.json
+          if-no-files-found: warn
+          retention-days: 7

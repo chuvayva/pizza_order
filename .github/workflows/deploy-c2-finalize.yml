@@ -1,0 +1,62 @@
+name: Deploy C2 (finalize of 2 workflows)
+
+# Phase 2 of the split deployment — see Deploy C1 for the shape.
+#
+# This workflow owns no state of its own: it locates the newest
+# `deploy-state-c` artifact produced for this ref by ANY workflow in the repo
+# and continues from it. If there is none, it refuses instead of silently
+# running a full deploy.
+on:
+  workflow_dispatch:
+
+# Same group as Deploy C1 — a finalize clicked while phase 1 is still applying
+# waits for it instead of racing it.
+concurrency:
+  group: deploy-c-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  phase_2:
+    name: Phase 2 — finalize
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore deployment state from phase 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: .github/scripts/fetch_deploy_state.sh deploy-state-c --required
+
+      - name: Show restored state
+        run: script/test_deploy.sh --status
+
+      - name: Run phase 2
+        run: script/test_deploy.sh --finalize
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy C2 — finalize"
+            echo
+            echo '```json'
+            cat tmp/deploy_state.json 2>/dev/null || echo '{}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-state-c
+          path: tmp/deploy_state.json
+          if-no-files-found: warn
+          retention-days: 7
