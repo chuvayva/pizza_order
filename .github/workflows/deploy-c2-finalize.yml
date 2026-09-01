@@ -35,10 +35,24 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: .github/scripts/fetch_deploy_state.sh deploy-state-c --required
 
+      - name: Resolve when this finalize was requested
+        id: click
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The run's created_at is when the button was clicked — not when a
+          # runner picked it up. Comparing it with the gate timestamp is what
+          # lets the script reject a finalize clicked before the gate existed.
+          echo "requested_at=$(gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID" --jq '.created_at')" >> "$GITHUB_OUTPUT"
+
       - name: Show restored state
         run: script/test_deploy.sh --status
 
       - name: Run phase 2
+        env:
+          DEPLOY_CLICK_TIME: ${{ steps.click.outputs.requested_at }}
         run: script/test_deploy.sh --finalize
 
       - name: Summary

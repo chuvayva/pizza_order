@@ -21,6 +21,10 @@ on:
         description: "Ignore state from previous runs and start from scratch"
         type: boolean
         default: false
+      fail_at:
+        description: "Test hook — crash at this step (blank = never)"
+        type: string
+        default: ""
 
 # Shared with Deploy C2 — one deployment at a time per ref, across both files.
 concurrency:
@@ -49,6 +53,8 @@ jobs:
         run: .github/scripts/fetch_deploy_state.sh deploy-state-c
 
       - name: Run phase 1
+        env:
+          DEPLOY_FAIL_AT: ${{ inputs.fail_at }}
         run: script/test_deploy.sh --until ${{ inputs.until_step }}
 
       - name: Summary
