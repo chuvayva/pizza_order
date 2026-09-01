@@ -1,0 +1,127 @@
+name: Deploy B (environment gate, phased)
+
+# Two-phased deployment inside a SINGLE run, split by a real approval gate:
+#
+#   phase_1 (steps 1..N)  ->  [ Environment "production" required reviewer ]  ->  phase_2 (--finalize)
+#
+# The run pauses between the jobs until somebody clicks "Review deployments →
+# Approve and deploy". No second trigger is needed, and the state travels
+# between the two jobs as the `deploy-state-phase-1` artifact.
+#
+# N comes from the workflow_dispatch input, or from a [deploy:until=N] marker
+# in the head commit message on push (default 3).
+on:
+  workflow_dispatch:
+    inputs:
+      until_step:
+        description: "Last step to apply before the approval gate (1-5)"
+        type: string
+        default: "3"
+  push:
+    branches: [ main, deploy-test ]
+
+concurrency:
+  group: deploy-gated-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  phase_1:
+    name: Phase 1 — up to the gate
+    runs-on: ubuntu-latest
+    outputs:
+      until_step: ${{ steps.plan.outputs.until_step }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve gate position
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_UNTIL: ${{ inputs.until_step }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            until_step="$INPUT_UNTIL"
+          else
+            message="$(printf '%s' "$COMMIT_MESSAGE" | head -n 20)"
+            until_step="$(printf '%s' "$message" | grep -oiE '\[deploy:until=[0-9]+\]' | head -n1 | tr -dc '0-9' || true)"
+          fi
+          until_step="${until_step:-3}"
+          echo "until_step=$until_step" >> "$GITHUB_OUTPUT"
+          echo "Gate after step $until_step"
+
+      - name: Run phase 1
+        run: script/test_deploy.sh --until ${{ steps.plan.outputs.until_step }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Phase 1 — applied through step ${{ steps.plan.outputs.until_step }}"
+            echo
+            echo '```json'
+            cat tmp/deploy_state.json 2>/dev/null || echo '{}'
+            echo '```'
+            echo
+            echo "Waiting for approval on environment \`production\` before phase 2."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-state-phase-1
+          path: tmp/deploy_state.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  phase_2:
+    name: Phase 2 — after approval
+    needs: phase_1
+    runs-on: ubuntu-latest
+    # The gate: this job does not start until a required reviewer of the
+    # `production` environment approves the deployment.
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Restore state from phase 1
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-state-phase-1
+          path: tmp
+
+      - name: Show restored state
+        run: script/test_deploy.sh --status
+
+      - name: Run phase 2
+        run: script/test_deploy.sh --finalize
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Phase 2 — finalized after approval"
+            echo
+            echo '```json'
+            cat tmp/deploy_state.json 2>/dev/null || echo '{}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload final deployment state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-state-final
+          path: tmp/deploy_state.json
+          if-no-files-found: warn
+          retention-days: 7
