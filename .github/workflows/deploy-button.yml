@@ -1,0 +1,135 @@
+name: Deploy A (button, phased)
+
+# Two-phased deployment harness. No real services are touched — every step
+# just sleeps. The state of finished steps travels between runs as the
+# `deploy-state` artifact ({"1":"applied", ...}).
+#
+# Phase is chosen by:
+#   * workflow_dispatch — the "Run workflow" form (phase + until_step inputs)
+#   * push             — a marker in the head commit message:
+#                          [deploy:until=3]  -> phase 1
+#                          [deploy:finalize] -> phase 2
+#                          (no marker)       -> full deploy
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Deployment phase"
+        type: choice
+        default: until
+        options: [until, finalize, full]
+      until_step:
+        description: "Last step to apply when phase = until (1-5)"
+        type: string
+        default: "3"
+      reset_state:
+        description: "Ignore state from previous runs and start from scratch"
+        type: boolean
+        default: false
+  push:
+    branches: [ main, deploy-test ]
+
+concurrency:
+  group: deploy-button-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read # needed to download the state artifact of previous runs
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve deployment phase
+        id: phase
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_PHASE: ${{ inputs.phase }}
+          INPUT_UNTIL: ${{ inputs.until_step }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            phase="$INPUT_PHASE"
+            until_step="$INPUT_UNTIL"
+          else
+            message="$(printf '%s' "$COMMIT_MESSAGE" | head -n 20)"
+            if printf '%s' "$message" | grep -qiE '\[deploy:finalize\]'; then
+              phase="finalize"; until_step=""
+            elif printf '%s' "$message" | grep -qiE '\[deploy:until=[0-9]+\]'; then
+              phase="until"
+              until_step="$(printf '%s' "$message" | grep -oiE '\[deploy:until=[0-9]+\]' | head -n1 | tr -dc '0-9')"
+            else
+              phase="full"; until_step=""
+            fi
+          fi
+
+          case "$phase" in
+            until)    args="--until $until_step" ;;
+            finalize) args="--finalize" ;;
+            full)     args="" ;;
+            *)        echo "unknown phase: $phase" >&2; exit 1 ;;
+          esac
+
+          echo "phase=$phase"          >> "$GITHUB_OUTPUT"
+          echo "args=$args"            >> "$GITHUB_OUTPUT"
+          echo "Trigger: $EVENT -> phase '$phase' (script/test_deploy.sh $args)"
+
+      - name: Restore deployment state from previous run
+        if: ${{ inputs.reset_state != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          restored=""
+          for id in $(gh run list --workflow deploy-button.yml --branch "$BRANCH" \
+                        --limit 20 --json databaseId --jq '.[].databaseId'); do
+            [ "$id" = "$RUN_ID" ] && continue
+            if gh run download "$id" --name deploy-state --dir tmp/previous-state >/dev/null 2>&1; then
+              cp tmp/previous-state/deploy_state.json tmp/deploy_state.json
+              restored="$id"
+              break
+            fi
+          done
+          if [ -n "$restored" ]; then
+            echo "Restored state from run $restored: $(jq -c . tmp/deploy_state.json)"
+          else
+            echo "No previous state artifact found on '$BRANCH' — starting from scratch"
+          fi
+
+      - name: Run deployment
+        run: script/test_deploy.sh ${{ steps.phase.outputs.args }}
+
+      - name: Summary
+        if: always()
+        env:
+          PHASE: ${{ steps.phase.outputs.phase }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Test Deploy — phase \`$PHASE\`"
+            echo
+            echo '```json'
+            cat tmp/deploy_state.json 2>/dev/null || echo '{}'
+            echo '```'
+            echo
+            script/test_deploy.sh --status || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployment state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-state
+          path: tmp/deploy_state.json
+          if-no-files-found: warn
+          retention-days: 7
