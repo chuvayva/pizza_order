@@ -28,5 +28,10 @@ RSpec.describe Pricing::Calculator do
       let(:order) { create :order, :with_promotion }
       it { should eql 16.29 }
     end
+
+    context "when order has promotion with a leftover pizza" do
+      let(:order) { create :order, :with_partial_promotion }
+      it { should eql 8.4 }
+    end
   end
 end
