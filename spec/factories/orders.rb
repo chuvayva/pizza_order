@@ -27,6 +27,16 @@ FactoryBot.define do
       end
     end
 
+    trait :with_partial_promotion do
+      promotion_codes { [ "2FOR1" ] }
+
+      after(:create) do |order|
+        create(:order_item, name: "Salami", size: "Small", order:)
+        create(:order_item, name: "Salami", size: "Small", order:)
+        create(:order_item, name: "Salami", size: "Small", order:)
+      end
+    end
+
     trait :with_promotion do
       discount_codes { [ "SAVE5" ] }
       promotion_codes { [ "2FOR1" ] }
